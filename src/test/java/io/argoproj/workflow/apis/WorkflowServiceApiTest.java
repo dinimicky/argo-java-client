@@ -13,12 +13,32 @@
 
 package io.argoproj.workflow.apis;
 
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Map.Entry;
+import java.util.Optional;
+import java.util.concurrent.TimeUnit;
+
 import com.google.gson.reflect.TypeToken;
 import io.argoproj.workflow.ApiCallback;
 import io.argoproj.workflow.ApiException;
+import io.argoproj.workflow.JSON;
+import io.argoproj.workflow.models.Arguments;
+import io.argoproj.workflow.models.DAGTask;
+import io.argoproj.workflow.models.DAGTemplate;
+import io.argoproj.workflow.models.Inputs;
+import io.argoproj.workflow.models.NodeStatus;
+import io.argoproj.workflow.models.Parameter;
+import io.argoproj.workflow.models.RetryStrategy;
 import io.argoproj.workflow.models.StreamResultOfEvent;
 import io.argoproj.workflow.models.StreamResultOfLogEntry;
 import io.argoproj.workflow.models.StreamResultOfWorkflowWatchEvent;
+import io.argoproj.workflow.models.Template;
 import io.argoproj.workflow.models.Workflow;
 import io.argoproj.workflow.models.WorkflowCreateRequest;
 import io.argoproj.workflow.models.WorkflowLintRequest;
@@ -27,6 +47,7 @@ import io.argoproj.workflow.models.WorkflowResubmitRequest;
 import io.argoproj.workflow.models.WorkflowResumeRequest;
 import io.argoproj.workflow.models.WorkflowRetryRequest;
 import io.argoproj.workflow.models.WorkflowSetRequest;
+import io.argoproj.workflow.models.WorkflowSpec;
 import io.argoproj.workflow.models.WorkflowStopRequest;
 import io.argoproj.workflow.models.WorkflowSubmitRequest;
 import io.argoproj.workflow.models.WorkflowSuspendRequest;
@@ -34,21 +55,20 @@ import io.argoproj.workflow.models.WorkflowTerminateRequest;
 import io.kubernetes.client.openapi.ApiClient;
 import io.kubernetes.client.openapi.Configuration;
 import io.kubernetes.client.openapi.apis.CoreV1Api;
+import io.kubernetes.client.openapi.models.V1Container;
 import io.kubernetes.client.openapi.models.V1Namespace;
+import io.kubernetes.client.openapi.models.V1ObjectMeta;
 import io.kubernetes.client.util.Config;
 import io.kubernetes.client.util.Watch;
-import io.kubernetes.client.util.Watch.Response;
 import okhttp3.OkHttpClient;
+import okhttp3.Response;
+import okio.BufferedSource;
+import org.jgrapht.Graph;
+import org.jgrapht.graph.DefaultEdge;
+import org.jgrapht.graph.SimpleDirectedGraph;
 import org.junit.Before;
-import org.junit.Test;
 import org.junit.Ignore;
-
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.TimeUnit;
+import org.junit.Test;
 
 /**
  * API tests for WorkflowServiceApi
@@ -59,8 +79,9 @@ public class WorkflowServiceApiTest {
     private final WorkflowServiceApi api = new WorkflowServiceApi();
 
     @Before
-    public void initClient() {
-        api.getApiClient().setBasePath("http://localhost:2746");
+    public void initTest() {
+        api.getApiClient().setBasePath("https://localhost:2746");
+        api.getApiClient().setLenientOnJson(true);
     }
 
     /**
@@ -68,11 +89,88 @@ public class WorkflowServiceApiTest {
      */
     @Test
     public void createWorkflowTest() throws ApiException {
-        String namespace = null;
-        WorkflowCreateRequest body = null;
+        String namespace = "argo";
+        WorkflowCreateRequest body = new WorkflowCreateRequest();
+        body.setServerDryRun(false); // if true, not create real wf
+        body.setNamespace(namespace);
+        body.setWorkflow(new Workflow());
+        V1ObjectMeta metadata = new V1ObjectMeta();
+        body.getWorkflow().setMetadata(metadata);
+        metadata.setGenerateName("demo-hello-world-");
+        metadata.setNamespace(namespace);
+        Map<String, String> labels = new HashMap<>();
+        metadata.setLabels(labels);
+        labels.put("workflows.argoproj.io/completed", "false");
+
+        String tmplName = "whalesay";
+        String dagTmplName = "dag-demo";
+        WorkflowSpec spec = new WorkflowSpec();
+        body.getWorkflow().setSpec(spec);
+        List<Template> templates = new ArrayList<>();
+        spec.setTemplates(templates);
+
+        Template tmpl = new Template();
+        templates.add(tmpl);
+        tmpl.setName(tmplName);
+        Inputs inputs = new Inputs();
+        tmpl.setInputs(inputs);
+        Parameter parameter = new Parameter();
+        parameter.setName("msg");
+        inputs.setParameters(Arrays.asList(parameter));
+        V1Container container = new V1Container();
+        tmpl.setContainer(container);
+        container.setImage("docker/whalesay:latest");
+        container.setCommand(Arrays.asList("cowsay"));
+        container.setArgs(Arrays.asList("{{inputs.parameters.msg}}"));
+
+        String failureTmplName = "retry-container";
+        Template retryTmpl = new Template();
+        templates.add(retryTmpl);
+        retryTmpl.setName(failureTmplName);
+        V1Container retryContainer = new V1Container();
+        retryTmpl.setContainer(retryContainer);
+        retryContainer.setImage("python:alpine3.6");
+        retryContainer.setCommand(Arrays.asList("python", "-c"));
+        retryContainer.setArgs(
+            Arrays.asList("import random; import sys; exit_code = random.choice([0, 1]);sys.exit(exit_code)"));
+        RetryStrategy retryStrategy = new RetryStrategy();
+        retryTmpl.setRetryStrategy(retryStrategy);
+        retryStrategy.setLimit(10);
+
+        Template dagTmpl = new Template();
+        templates.add(dagTmpl);
+        DAGTemplate dag = new DAGTemplate();
+        dagTmpl.setDag(dag);
+        dagTmpl.setName(dagTmplName);
+        DAGTask dagTaskA = buildDAGTask(dagTmplName, "A", tmplName);
+        dagTaskA.setArguments(new Arguments());
+        Parameter dagTaskAArg = new Parameter();
+        dagTaskAArg.setName("msg");
+        dagTaskAArg.setValue("hello arg A");
+        dagTaskA.getArguments().setParameters(Arrays.asList(dagTaskAArg));
+        DAGTask dagTaskB = buildDAGTask(dagTmplName, "B", failureTmplName);
+        DAGTask dagTaskC = buildDAGTask(dagTmplName, "C", tmplName);
+        dagTaskC.setArguments(new Arguments());
+        Parameter dagTaskCArg = new Parameter();
+        dagTaskC.getArguments().setParameters(Arrays.asList(dagTaskCArg));
+        dagTaskCArg.setName("msg");
+        dagTaskCArg.setValue("hello arg C");
+        dagTaskC.setDependencies(Arrays.asList(dagTaskA.getName(), dagTaskB.getName()));
+        dag.setTasks(Arrays.asList(dagTaskA, dagTaskB, dagTaskC));
+        spec.setEntrypoint(dagTmpl.getName());
+
+        System.out.println(body);
         Workflow response = api.createWorkflow(namespace, body);
+        System.out.println(response);
 
         // TODO: test validations
+    }
+
+    private DAGTask buildDAGTask(String prefix, String name, String templateName) {
+        DAGTask dagTask = new DAGTask();
+        dagTask.setName(prefix + "-" + name);
+        dagTask.setTemplate(templateName);
+        return dagTask;
     }
 
     /**
@@ -100,13 +198,53 @@ public class WorkflowServiceApiTest {
      */
     @Test
     public void getWorkflowTest() throws ApiException {
-        String namespace = null;
-        String name = null;
+        String namespace = "argo";
+        String name = "demo-hello-world-nj4mc";
         String getOptionsResourceVersion = null;
         String fields = null;
-        Workflow response = api.getWorkflow(namespace, name, getOptionsResourceVersion, fields);
+        //Workflow response = api.getWorkflow(namespace, name, getOptionsResourceVersion, fields);
+        Workflow wf = api.getWorkflow(namespace, name, null, null);
+        JSON json = new JSON();
+        System.out.println(json.serialize(wf));
 
-        // TODO: test validations
+        Map<String, Template> map = new HashMap<>();
+        for (Template template : wf.getSpec().getTemplates()) {
+            map.put(template.getName(), template);
+        }
+
+        Graph<String, DefaultEdge> g = new SimpleDirectedGraph<>(DefaultEdge.class);
+        for (Entry<String, NodeStatus> entry : wf.getStatus().getNodes().entrySet()) {
+            NodeStatus status = entry.getValue();
+            System.out.println(
+                String.format("%s:%s:%s:%s:%s:%s:%s %s %s", entry.getKey(), status.getName(), status.getId(),
+                    status.getPhase(), status.getChildren(), status.getBoundaryID(), status.getOutboundNodes(),
+                    status.getStartedAt(), status.getFinishedAt()));
+            g.addVertex(entry.getKey());
+            for (String key : Optional.ofNullable(entry.getValue()).map(NodeStatus::getChildren).orElse(Collections.emptyList())) {
+                g.addVertex(key);
+                g.addEdge(entry.getKey(), key);
+            }
+        }
+        System.out.println(g);
+
+        Graph<NodeStatus, DefaultEdge> g2 = new SimpleDirectedGraph<>(DefaultEdge.class);
+        for (Entry<String, NodeStatus> entry : wf.getStatus().getNodes().entrySet()) {
+            NodeStatus status = entry.getValue();
+            System.out.println(
+                String.format("%s:%s:%s:%s:%s:%s:%s %s %s", entry.getKey(), status.getName(), status.getId(),
+                    status.getPhase(), status.getChildren(), status.getBoundaryID(), status.getOutboundNodes(),
+                    status.getStartedAt(), status.getFinishedAt()));
+            g2.addVertex(entry.getValue());
+            for (String key : Optional.ofNullable(entry.getValue()).map(NodeStatus::getChildren).orElse(Collections.emptyList())) {
+                NodeStatus child = wf.getStatus().getNodes().get(key);
+                g2.addVertex(child);
+                g2.addEdge(entry.getValue(), child);
+            }
+        }
+        System.out.println(g2);
+
+
+
     }
 
     /**
@@ -126,6 +264,8 @@ public class WorkflowServiceApiTest {
      */
     @Test
     public void listWorkflowsTest() throws ApiException {
+        //api.getApiClient().setBasePath("https://localhost:2746");
+
         String namespace = "argo";
         String listOptionsLabelSelector = null;
         String listOptionsFieldSelector = null;
@@ -141,7 +281,7 @@ public class WorkflowServiceApiTest {
             listOptionsLimit, listOptionsContinue, fields);
 
         System.out.println(response);
-        // TODO: test validations
+
     }
 
     /**
@@ -282,40 +422,16 @@ public class WorkflowServiceApiTest {
         String namespace = "argo";
         String listOptionsLabelSelector = null;
         String listOptionsFieldSelector = null;
-        Boolean listOptionsWatch = true;
-        Boolean listOptionsAllowWatchBookmarks = true;
-        String listOptionsResourceVersion = "0";
+        Boolean listOptionsWatch = null;
+        Boolean listOptionsAllowWatchBookmarks = null;
+        String listOptionsResourceVersion = null;
         String listOptionsTimeoutSeconds = "10";
         String listOptionsLimit = null;
         String listOptionsContinue = null;
-        ApiCallback<StreamResultOfEvent> cb = new ApiCallback<StreamResultOfEvent>() {
-
-            @Override
-            public void onFailure(ApiException e, int statusCode, Map<String, List<String>> responseHeaders) {
-
-            }
-
-            @Override
-            public void onSuccess(StreamResultOfEvent result, int statusCode,
-                Map<String, List<String>> responseHeaders) {
-                System.out.println(result);
-            }
-
-            @Override
-            public void onUploadProgress(long bytesWritten, long contentLength, boolean done) {
-
-            }
-
-            @Override
-            public void onDownloadProgress(long bytesRead, long contentLength, boolean done) {
-
-            }
-        };
-        okhttp3.Call res = api.watchEventsAsync(namespace, listOptionsLabelSelector, listOptionsFieldSelector,
+        StreamResultOfEvent response = api.watchEvents(namespace, listOptionsLabelSelector, listOptionsFieldSelector,
             listOptionsWatch, listOptionsAllowWatchBookmarks, listOptionsResourceVersion, listOptionsTimeoutSeconds,
-            listOptionsLimit, listOptionsContinue, null);
+            listOptionsLimit, listOptionsContinue);
 
-        System.out.println(res.isExecuted());
         // TODO: test validations
     }
 
@@ -323,49 +439,64 @@ public class WorkflowServiceApiTest {
      * @throws ApiException if the Api call fails
      */
     @Test
-    public void watchWorkflowsTest() throws ApiException, IOException {
+    public void watchWorkflowsTest() throws IOException {
+
         String namespace = "argo";
         String listOptionsLabelSelector = null;
         String listOptionsFieldSelector = null;
-        Boolean listOptionsWatch = true;
-        Boolean listOptionsAllowWatchBookmarks = true;
+        Boolean listOptionsWatch = null;
+        Boolean listOptionsAllowWatchBookmarks = null;
         String listOptionsResourceVersion = "0";
         String listOptionsTimeoutSeconds = null;
-        String listOptionsLimit = "10";
-        String listOptionsContinue = null;
+        String listOptionsLimit = "1";
+        String listOptionsContinue = "";
+        try {
+            ApiCallback<StreamResultOfWorkflowWatchEvent> cb = new ApiCallback<StreamResultOfWorkflowWatchEvent>() {
+                @Override
+                public void onFailure(ApiException e, int statusCode, Map<String, List<String>> responseHeaders) {
 
-        final List<StreamResultOfWorkflowWatchEvent> events = new ArrayList<>();
-        ApiCallback<StreamResultOfWorkflowWatchEvent> cb = new ApiCallback<StreamResultOfWorkflowWatchEvent>() {
-            @Override
-            public void onFailure(ApiException e, int statusCode, Map<String, List<String>> responseHeaders) {
+                }
 
+                @Override
+                public void onSuccess(StreamResultOfWorkflowWatchEvent result, int statusCode,
+                    Map<String, List<String>> responseHeaders) {
+                    System.out.println("result:" + result);
+                }
+
+                @Override
+                public void onUploadProgress(long bytesWritten, long contentLength, boolean done) {
+
+                }
+
+                @Override
+                public void onDownloadProgress(long bytesRead, long contentLength, boolean done) {
+
+                }
+            };
+            okhttp3.Call res = api.watchWorkflowsCall(namespace, listOptionsLabelSelector, listOptionsFieldSelector,
+                listOptionsWatch, listOptionsAllowWatchBookmarks, listOptionsResourceVersion, listOptionsTimeoutSeconds,
+                listOptionsLimit, listOptionsContinue, cb);
+
+            if (res.isExecuted()) {
+
+                System.out.println(res);
+            } else {
+                try (Response response = res.execute()) {
+                    BufferedSource source = response.body().source();
+                    for (int i = 1; !source.exhausted(); i++) {
+                        System.out.println(i + ":" + source.readUtf8Line());
+                    }
+
+                }
             }
 
-            @Override
-            public void onSuccess(StreamResultOfWorkflowWatchEvent result, int statusCode,
-                Map<String, List<String>> responseHeaders) {
-                events.add(result);
-            }
-
-            @Override
-            public void onUploadProgress(long bytesWritten, long contentLength, boolean done) {
-
-            }
-
-            @Override
-            public void onDownloadProgress(long bytesRead, long contentLength, boolean done) {
-
-            }
-        };
-        okhttp3.Call res = api.watchWorkflowsAsync(namespace, listOptionsLabelSelector, listOptionsFieldSelector,
-            listOptionsWatch, listOptionsAllowWatchBookmarks, listOptionsResourceVersion, listOptionsTimeoutSeconds,
-            listOptionsLimit, listOptionsContinue, cb);
-
-        if (res.isExecuted()) {
-
-            System.out.println(events);
+        } catch (ApiException e) {
+            System.err.println("Exception when calling WorkflowServiceApi#watchWorkflows");
+            System.err.println("Status code: " + e.getCode());
+            System.err.println("Reason: " + e.getResponseBody());
+            System.err.println("Response headers: " + e.getResponseHeaders());
+            e.printStackTrace();
         }
-
 
     }
 
@@ -374,7 +505,7 @@ public class WorkflowServiceApiTest {
      */
     @Test
     public void workflowLogsTest() throws ApiException {
-        String namespace = null;
+        String namespace = "argo";
         String name = null;
         String podName = null;
         String logOptionsContainer = null;
@@ -406,12 +537,12 @@ public class WorkflowServiceApiTest {
         CoreV1Api api = new CoreV1Api();
 
         try (Watch<V1Namespace> watch = Watch.createWatch(client,
-            api.listNamespaceCall(null, null, null, null, null, 5, null, 5, Boolean.TRUE, null),
-            new TypeToken<Response<V1Namespace>>() {}.getType())) {
-            for (Response<V1Namespace> item : watch) {
+            api.listNamespaceCall(null, null, null, null, null, 10, null, 5, Boolean.TRUE, null),
+            new TypeToken<Watch.Response<V1Namespace>>() {}.getType())) {
+            for (Watch.Response<V1Namespace> item : watch) {
                 System.out.printf("%s : %s%n", item.type, item.object.getMetadata().getName());
             }
         }
     }
+
 }
-    
