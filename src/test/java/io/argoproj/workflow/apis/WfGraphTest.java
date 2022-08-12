@@ -295,6 +295,7 @@ public class WfGraphTest {
         ComponentInstance cfg1Instance = new ComponentInstance();
         cfg1Instance.setId(cfg1.getName() + "-1");
         cfg1Instance.setComponent(cfg1);
+        cfg1Instance.getComponent().getArguments().getParameters().get(0).setValue("hello config1");
 
         ComponentInstance exec1Instance = new ComponentInstance();
         exec1Instance.setId(exec1.getName() + "-1");
@@ -308,6 +309,7 @@ public class WfGraphTest {
         componentInstanceMap.put(exec1Instance.getId(), exec1Instance);
 
         Map<String, String> componentArgumentRelationship = new HashMap<>();
+        componentGraph.setComponentArgumentRelationship(componentArgumentRelationship);
         String origPath = StringUtils.join(Arrays.asList(cfg1Instance.getComponent().getName(), cfg1Instance.getId(),
             cfg1Instance.getComponent().getArguments().getClass().getSimpleName(),
             "parameters",
@@ -331,7 +333,7 @@ public class WfGraphTest {
 
     private WorkflowCreateRequest buildWorkflow(String namespace, ComponentGraph componentGraph) {
         WorkflowCreateRequest body = new WorkflowCreateRequest();
-        body.setServerDryRun(true); // if true, not create real wf
+        body.setServerDryRun(false); // if true, not create real wf
         body.setNamespace(namespace);
         body.setWorkflow(new Workflow());
         V1ObjectMeta metadata = new V1ObjectMeta();
@@ -379,16 +381,27 @@ public class WfGraphTest {
             container.setArgs(Arrays.asList(
                 "{{inputs.parameters." + compInst.getComponent().getInputs().getParameters().get(0).getName() + "}}"));
 
+
+        }
+
+        for (Entry<String, String> relation : componentGraph.getComponentArgumentRelationship().entrySet()) {
+            String[] src = StringUtils.split(relation.getKey(), ".");
+            String[] dst = StringUtils.split(relation.getValue(), ".");
+
             // 加入图
-            DAGTask dagTask = buildDAGTask(compInst);
+            ComponentInstance dstCompInst = componentGraph.getComponentInstanceMap().get(dst[1]);
+            ComponentInstance srcCompInst = componentGraph.getComponentInstanceMap().get(src[1]);
+            DAGTask dagTask = buildDAGTask(dstCompInst);
             Parameter dagTaskArg = new Parameter();
-            dagTaskArg.setName(compInst.getComponent().getInputs().getParameters().get(0).getName());
-            dagTaskArg.setValue("hello arg A");
+            dagTaskArg.setName(dstCompInst.getComponent().getInputs().getParameters().get(0).getName());
+            dagTaskArg.setValue(
+                String.format("{{workflow.parameters.%s}}", srcCompInst.getComponent().getArguments().getParameters().get(0).getName()));
             Arguments taskArgs = new Arguments();
             dagTask.setArguments(taskArgs);
             taskArgs.setParameters(Arrays.asList(dagTaskArg));
             tasks.add(dagTask);
         }
+
 
         spec.setEntrypoint(dagTmpl.getName());
 
