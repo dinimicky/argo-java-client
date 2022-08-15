@@ -374,13 +374,7 @@ public class WfGraphTest {
             tmpl.setName(compInst.getComponent().getName());
             tmpl.setInputs(compInst.getComponent().getInputs());
             tmpl.setOutputs(compInst.getComponent().getOutputs());
-            V1Container container = new V1Container();
-            tmpl.setContainer(container);
-            container.setImage("docker/whalesay:latest");
-            container.setCommand(Arrays.asList("cowsay"));
-            container.setArgs(Arrays.asList(
-                "{{inputs.parameters." + compInst.getComponent().getInputs().getParameters().get(0).getName() + "}}"));
-
+            tmpl.setContainer(compInst.getComponent().getContainer());
 
         }
 
@@ -395,13 +389,13 @@ public class WfGraphTest {
             Parameter dagTaskArg = new Parameter();
             dagTaskArg.setName(dstCompInst.getComponent().getInputs().getParameters().get(0).getName());
             dagTaskArg.setValue(
-                String.format("{{workflow.parameters.%s}}", srcCompInst.getComponent().getArguments().getParameters().get(0).getName()));
+                String.format("{{workflow.parameters.%s}}",
+                    srcCompInst.getComponent().getArguments().getParameters().get(0).getName()));
             Arguments taskArgs = new Arguments();
             dagTask.setArguments(taskArgs);
             taskArgs.setParameters(Arrays.asList(dagTaskArg));
             tasks.add(dagTask);
         }
-
 
         spec.setEntrypoint(dagTmpl.getName());
 
@@ -420,16 +414,22 @@ public class WfGraphTest {
         input1.setName(name + "-input1");
         inputs.setParameters(Arrays.asList(input1));
 
-        if (false) {
-            Outputs outputs = new Outputs();
-            component.setOutputs(outputs);
-            Parameter output1 = new Parameter();
-            output1.setName(name + "output1");
-            ValueFrom outputValueFrom = new ValueFrom();
-            outputValueFrom.setPath("/tmp/" + output1.getName());
-            output1.setValueFrom(outputValueFrom);
-            outputs.setParameters(Arrays.asList(output1));
-        }
+        Outputs outputs = new Outputs();
+        component.setOutputs(outputs);
+        Parameter output1 = new Parameter();
+        output1.setName(name + "output1");
+        ValueFrom outputValueFrom = new ValueFrom();
+        outputValueFrom.setPath("/cowsay/README");
+        output1.setValueFrom(outputValueFrom);
+        output1.setDefault("this is default");
+        outputs.setParameters(Arrays.asList(output1));
+
+        V1Container container = new V1Container();
+        component.setContainer(container);
+        container.setImage("docker/whalesay:latest");
+        container.setCommand(Arrays.asList("cowsay"));
+        container.setArgs(Arrays.asList(
+            "{{inputs.parameters." + component.getInputs().getParameters().get(0).getName() + "}}"));
 
         return component;
     }

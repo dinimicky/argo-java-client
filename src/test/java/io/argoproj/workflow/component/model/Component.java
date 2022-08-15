@@ -4,6 +4,7 @@ import io.argoproj.workflow.models.Arguments;
 import io.argoproj.workflow.models.Inputs;
 import io.argoproj.workflow.models.Outputs;
 import io.argoproj.workflow.models.Template;
+import io.kubernetes.client.openapi.models.V1Container;
 
 /**
  * @author ezonghu
@@ -23,6 +24,16 @@ public class Component {
     private String type = "exec";
 
     private String name;
+
+    public V1Container getContainer() {
+        return container;
+    }
+
+    public void setContainer(V1Container container) {
+        this.container = container;
+    }
+
+    private V1Container container;
 
     public Inputs getInputs() {
         return inputs;
