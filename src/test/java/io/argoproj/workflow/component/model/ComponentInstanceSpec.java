@@ -1,17 +1,15 @@
 
 package io.argoproj.workflow.component.model;
 
-import io.argoproj.workflow.models.Arguments;
-import io.argoproj.workflow.models.Inputs;
-import io.argoproj.workflow.models.Outputs;
-
 /**
  * @author ezonghu
  * @date 2022/08/09
  */
-public class ComponentInstance {
+public class ComponentInstanceSpec {
 
     private String id;
+
+    private String description;
 
     private Component component;
 

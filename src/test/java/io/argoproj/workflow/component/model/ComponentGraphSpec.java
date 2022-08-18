@@ -8,13 +8,13 @@ import io.argoproj.workflow.models.Arguments;
  * @author ezonghu
  * @date 2022/08/09
  */
-public class ComponentGraph {
+public class ComponentGraphSpec {
 
     private String name;
 
     private String description;
 
-    private Map<String, ComponentInstance> componentInstanceMap;
+    private Map<String, ComponentInstanceSpec> componentInstanceMap;
 
     private Arguments arguments;
 
@@ -35,12 +35,12 @@ public class ComponentGraph {
         this.name = name;
     }
 
-    public Map<String, ComponentInstance> getComponentInstanceMap() {
+    public Map<String, ComponentInstanceSpec> getComponentInstanceMap() {
         return componentInstanceMap;
     }
 
     public void setComponentInstanceMap(
-        Map<String, ComponentInstance> componentInstanceMap) {
+        Map<String, ComponentInstanceSpec> componentInstanceMap) {
         this.componentInstanceMap = componentInstanceMap;
     }
 
