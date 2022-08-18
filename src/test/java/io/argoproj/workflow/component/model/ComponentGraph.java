@@ -12,6 +12,8 @@ public class ComponentGraph {
 
     private String name;
 
+    private String description;
+
     private Map<String, ComponentInstance> componentInstanceMap;
 
     private Arguments arguments;

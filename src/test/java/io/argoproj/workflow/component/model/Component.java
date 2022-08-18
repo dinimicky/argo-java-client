@@ -1,5 +1,7 @@
 package io.argoproj.workflow.component.model;
 
+import java.util.Map;
+
 import io.argoproj.workflow.models.Arguments;
 import io.argoproj.workflow.models.Inputs;
 import io.argoproj.workflow.models.Outputs;
@@ -24,6 +26,12 @@ public class Component {
     private String type = "exec";
 
     private String name;
+
+    private String description;
+
+    private Map<String, String> inputsDescriptions;
+
+    private Map<String, String> outputsDescriptions;
 
     public V1Container getContainer() {
         return container;

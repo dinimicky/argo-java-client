@@ -22,10 +22,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import io.argoproj.workflow.ApiCallback;
 import io.argoproj.workflow.ApiException;
 import io.argoproj.workflow.JSON;
+import io.argoproj.workflow.Pair;
 import io.argoproj.workflow.component.model.Component;
 import io.argoproj.workflow.component.model.ComponentGraph;
 import io.argoproj.workflow.component.model.ComponentInstance;
@@ -55,6 +57,8 @@ import org.jgrapht.graph.SimpleDirectedGraph;
 import org.junit.Before;
 import org.junit.Ignore;
 import org.junit.Test;
+import org.omg.CORBA.NameValuePair;
+import org.yaml.snakeyaml.Yaml;
 
 /**
  * API tests for WorkflowServiceApi
@@ -445,6 +449,56 @@ public class WfGraphTest {
         arguments.setParameters(Arrays.asList(parameter));
         component.setArguments(arguments);
         return component;
+    }
+
+    @Test
+    public void printAirflowSensor() {
+        Template airflowSensor = buildAirflowSensorTemplate();
+        Yaml yaml = new Yaml();
+        System.out.println(yaml.dump(airflowSensor));
+    }
+
+    private Template buildAirflowSensorTemplate() {
+        Template template = new Template();
+
+        template.setName("airflow-sensor");
+        Inputs inputs = new Inputs();
+        Map<String, String> nameDefaultValueMap = new HashMap<String, String>();
+        nameDefaultValueMap.put("dag-id", null);
+        nameDefaultValueMap.put("task-id", null);
+        nameDefaultValueMap.put("execution-delta", null);
+        nameDefaultValueMap.put("current-execution-date", "");
+        nameDefaultValueMap.put("current-execution-date-format", "%Y-%m-%dT%H:%M:%S");
+        nameDefaultValueMap.put("timeout-minutes", null);
+        nameDefaultValueMap.put("server-addr", "kubeairflow.devops.xiaohongshu.com:30810");
+        nameDefaultValueMap.put("mysql-addr", "data_read:5v$jdyKQg^q6@mysql-airflow-slave1.int.xiaohongshu.com:33071");
+        nameDefaultValueMap.put("query-mode", "mysql");
+        nameDefaultValueMap.put("all-execute-date", "[]");
+        List<Parameter> parameters = nameDefaultValueMap.entrySet().stream().map(e -> {
+            Parameter p = new Parameter();
+            p.setName(e.getKey());
+            p.setDefault(e.getValue());
+            return p;
+        }).collect(Collectors.toList());
+        inputs.setParameters(parameters);
+
+        template.setInputs(inputs);
+        V1Container container = new V1Container();
+        container.setImage(
+            "docker-reg.devops.xiaohongshu.com/firefly/pipeline-component-airflow-sensor:master-f228b24");
+        container.setCommand(Arrays.asList("python", "/component/src/airflow_sensor.py"));
+        List<String> args = inputs.getParameters().stream().map(
+            p -> String.format("--%s={{inputs.parameters.%s}}", p.getName(), p.getName())).collect(Collectors.toList());
+        container.setArgs(args);
+        template.setContainer(container);
+        return template;
+    }
+
+    private Template buildTrainComponentTemplate() {
+        Template template = new Template();
+        template.setName("tfjob-launch");
+
+        return template;
     }
 
 }
