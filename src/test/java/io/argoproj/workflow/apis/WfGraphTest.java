@@ -31,6 +31,7 @@ import io.argoproj.workflow.component.model.Component;
 import io.argoproj.workflow.component.model.ComponentGraphSpec;
 import io.argoproj.workflow.component.model.ComponentInstanceSpec;
 import io.argoproj.workflow.models.Arguments;
+import io.argoproj.workflow.models.Artifact;
 import io.argoproj.workflow.models.DAGTask;
 import io.argoproj.workflow.models.DAGTemplate;
 import io.argoproj.workflow.models.Inputs;
@@ -492,10 +493,110 @@ public class WfGraphTest {
         return template;
     }
 
+    @Test
+    public void printTrainComponents() {
+        Template airflowSensor = buildTrainComponentTemplate();
+        Yaml yaml = new Yaml();
+        System.out.println(yaml.dump(airflowSensor));
+    }
     private Template buildTrainComponentTemplate() {
         Template template = new Template();
         template.setName("tfjob-launch");
+        Inputs inputs = new Inputs();
+        Map<String, String> nameDefaultValueMap = new HashMap<String, String>();
+        nameDefaultValueMap.put("tfjob-name", null);
+        nameDefaultValueMap.put("tfjob-timeout-minutes", "300");
+        nameDefaultValueMap.put("tfjob-crd-version", "v1");
+        nameDefaultValueMap.put("model-dir", null);
+        nameDefaultValueMap.put("namespace", "kubeflow");
+        nameDefaultValueMap.put("container-image", null);
+        nameDefaultValueMap.put("container-args", null);
+        nameDefaultValueMap.put("container-envs", "{}");
+        nameDefaultValueMap.put("worker-num", "1");
+        nameDefaultValueMap.put("worker-req-cores", "4");
+        nameDefaultValueMap.put("worker-limit-cores", "8");
+        nameDefaultValueMap.put("worker-req-mem", "1.5Gi");
+        nameDefaultValueMap.put("worker-limit-mem", "2Gi");
+        nameDefaultValueMap.put("worker-limit-gpu", "0");
+        nameDefaultValueMap.put("ps-num", "1");
+        nameDefaultValueMap.put("ps-req-cores", "4");
+        nameDefaultValueMap.put("ps-limit-cores", "8");
+        nameDefaultValueMap.put("ps-req-mem", "4Gi");
+        nameDefaultValueMap.put("ps-limit-mem", "8Gi");
+        nameDefaultValueMap.put("ps-limit-gpu", "0");
+        nameDefaultValueMap.put("evaluator-num", "1");
+        nameDefaultValueMap.put("evaluator-req-cores", "2");
+        nameDefaultValueMap.put("evaluator-limit-cores", "4");
+        nameDefaultValueMap.put("evaluator-req-mem", "1.5Gi");
+        nameDefaultValueMap.put("evaluator-limit-mem", "2Gi");
+        nameDefaultValueMap.put("evaluator-limit-gpu", "0");
+        nameDefaultValueMap.put("co-location-same-zone", "True");
+        nameDefaultValueMap.put("co-location-same-node", "True");
+        nameDefaultValueMap.put("worker-node-selector", "{}");
+        nameDefaultValueMap.put("ps-node-selector", "{}");
+        nameDefaultValueMap.put("evaluator-node-selector", "{}");
+        nameDefaultValueMap.put("tolerations", "[]");
+        nameDefaultValueMap.put("ps-tolerations", "[]");
+        nameDefaultValueMap.put("worker-tolerations", "[]");
+        nameDefaultValueMap.put("evaluator-tolerations", "[]");
+        nameDefaultValueMap.put("workflow-uid", "{{workflow.uid}}");
+        nameDefaultValueMap.put("workflow-name", "{{workflow.name}}");
+        nameDefaultValueMap.put("restart-policy", "OnFailure");
+        nameDefaultValueMap.put("redis-host", "model-training-redis-master.kubeflow.svc.cluster.local");
+        nameDefaultValueMap.put("redis-port", "6379");
+        nameDefaultValueMap.put("apollo-server-url", "http://apollocc-cs.int.xiaohongshu.com");
+        nameDefaultValueMap.put("apollo-app-id", "");
+        nameDefaultValueMap.put("high-priority-whitelist-key", "firefly.train.high.priority.whitelist");
+        nameDefaultValueMap.put("mount-alluxio-volume", "False");
+        nameDefaultValueMap.put("cluster", "awsnx");
+        nameDefaultValueMap.put("scheduler-name", "volcano");
+        nameDefaultValueMap.put("skip-post-train-check", "False");
+        nameDefaultValueMap.put("adhoc-mode", "False");
+        nameDefaultValueMap.put("use-fleet", "False");
+        nameDefaultValueMap.put("ignore-failure", "False");
+        nameDefaultValueMap.put("worker-restart-policy", "OnFailure");
+        nameDefaultValueMap.put("label-for-clean-tfjob", "");
+        nameDefaultValueMap.put("is-ps-not-in-same-node", "False");
+        nameDefaultValueMap.put("pod-annotations", "{}");
+        nameDefaultValueMap.put("gpu-core-key", "nvidia.com/gpu");
+        nameDefaultValueMap.put("resource-tag", "stable");
 
+        List<Parameter> parameters = nameDefaultValueMap.entrySet().stream().map(e -> {
+            Parameter p = new Parameter();
+            p.setName(e.getKey());
+            p.setDefault(e.getValue());
+            return p;
+        }).collect(Collectors.toList());
+        inputs.setParameters(parameters);
+
+        template.setInputs(inputs);
+
+        V1Container container = new V1Container();
+        container.setImage(
+            "docker-reg.devops.xiaohongshu.com/firefly/pipeline-component-tfjob-launcher:dev-bainao-e320a5b");
+        container.setCommand(Arrays.asList("python", "/component/src/tfjob_launcher.py"));
+        List<String> args = inputs.getParameters().stream().map(
+            p -> String.format("--%s={{inputs.parameters.%s}}", p.getName(), p.getName())).collect(Collectors.toList());
+        container.setArgs(args);
+        template.setContainer(container);
+
+        Outputs outputs = new Outputs();
+        template.setOutputs(outputs);
+        List<Artifact> artifacts = new ArrayList<Artifact>();
+        outputs.setArtifacts(artifacts);
+        Artifact ui = new Artifact();
+        ui.setName("mlpipeline-ui-metadata");
+        ui.setOptional(true);
+        ui.setPath("/tmp/outputs/MLPipeline_UI_metadata/data");
+        artifacts.add(ui);
+        Artifact status = new Artifact();
+        ui.setName("job-status");
+        ui.setPath("/tfjob-status.txt");
+        artifacts.add(status);
+        Artifact modelDir = new Artifact();
+        ui.setName("model-dir");
+        ui.setPath("/output.txt");
+        artifacts.add(modelDir);
         return template;
     }
 

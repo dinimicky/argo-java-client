@@ -12,4 +12,7 @@ import io.argoproj.workflow.models.Arguments;
 public class ComponentGraphStatus extends BaseStatus{
 
     private Map<String, ComponentInstanceStatus> componentInstanceStatusMap;
+
+    private Map<String, String> componentSpecStatusMap;
+
 }
