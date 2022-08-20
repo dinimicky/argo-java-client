@@ -54,6 +54,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.jgrapht.Graph;
 import org.jgrapht.graph.DefaultEdge;
 import org.jgrapht.graph.SimpleDirectedGraph;
+import org.jose4j.json.internal.json_simple.JSONObject;
 import org.junit.Before;
 import org.junit.Ignore;
 import org.junit.Test;
@@ -597,6 +598,8 @@ public class WfGraphTest {
         ui.setName("model-dir");
         ui.setPath("/output.txt");
         artifacts.add(modelDir);
+
+
         return template;
     }
 
